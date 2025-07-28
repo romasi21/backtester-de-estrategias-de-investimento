@@ -1,0 +1,17 @@
+modules = ["python-3.12"]
+
+[nix]
+channel = "stable-25_05"
+packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "pkg-config", "qhull", "tcl", "tk"]
+
+[workflows]
+runButton = "teste"
+
+[[workflows.workflow]]
+name = "teste"
+mode = "sequential"
+author = 45417512
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python teste.py"

@@ -2,21 +2,64 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 
+class Backtester:
+    def __init__(self, df, capital_inicial):
+        self.df = df.dropna()
+        self.capital_inicial = capital_inicial
+        self.capital = capital_inicial
+        self.trades = []
+        self.posicao = False
+
+    def rodar_backtest(self): #itera todos os dias do df checando os sinais
+        print("Iniciando backtest...")
+        for indice, linha in self.df.iterrows():
+            self._checar_sinais(indice, linha)
+        print("Backtest finalizado.")
+        print(f"Resultado final: R$ {self.capital:.2f}")
+        
+    def _checar_sinais(self, data, dia_atual): #compara as médias móveis para cada dia e gera um sinal se necessário
+        posicao_atual = self.df.index.get_loc(data)
+        if posicao_atual == 0:
+            return
+        dia_anterior = self.df.iloc[posicao_atual - 1]
+        
+        if dia_atual['SMA_curta'].item() > dia_atual['SMA_longa'].item() and dia_anterior['SMA_curta'].item() <= dia_anterior['SMA_longa'].item() and not self.posicao:
+            preco_compra = dia_atual['Close'].item()
+            self._executar_compra(data.date(), preco_compra)
+            
+        elif dia_atual['SMA_curta'].item() < dia_atual['SMA_longa'].item() and dia_anterior['SMA_curta'].item() >= dia_anterior['SMA_longa'].item() and self.posicao:
+            preco_venda = dia_atual['Close'].item()
+            self._executar_venda(data.date(), preco_venda)
+
+    def _executar_compra(self, data, preco): #executa uma compra
+        self.posicao = True
+        self.trades.append({'data_compra': data, 'preco_compra': preco})
+
+    def _executar_venda(self, data, preco): #executa uma venda
+        self.posicao = False
+        self.trades.append({'data_venda': data, 'preco_venda': preco})
+
 codigo_ativo = input("Insira o código de um ativo (ex: VALE3.SA): ")
 inicio = input("Início do período (ex: 2020-01-01): ")
 fim = input("Final do período (ex: 2023-12-31): ")
 
+
 dados = yf.download(codigo_ativo, start=inicio, end=fim)
-dados['MMS21'] = dados['Close'].rolling(window=21).mean()
-dados['MMS50'] = dados['Close'].rolling(window=50).mean()
+dados['SMA_curta'] = dados['Close'].rolling(window=21).mean()
+dados['SMA_longa'] = dados['Close'].rolling(window=50).mean()
+ativo_1 = Backtester(dados, 10000)
+
+print(ativo_1.df)
+ativo_1.rodar_backtest()
+print(f"trades do ativo_1: {ativo_1.trades}")
 
 plt.plot(dados['Close'], label=f"Preco de fechamento ({codigo_ativo})")
-plt.plot(dados['MMS21'], label='Media movel de 21 dias')
-plt.plot(dados['MMS50'], label='Media movel de 50 dias')
+plt.plot(dados['SMA_curta'], label='Media movel curta')
+plt.plot(dados['SMA_longa'], label='Media movel longa')
 
 plt.title('Preco de Fechamento vs Media Movel')
 plt.xlabel('Data')
 plt.ylabel('Preco (R$)')
 plt.legend()
 plt.grid(True)
-plt.show()
+plt.savefig('grafico.png')
