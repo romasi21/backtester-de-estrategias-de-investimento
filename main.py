@@ -1,70 +1,81 @@
 import yfinance as yf
-import pandas as pd
 import matplotlib.pyplot as plt
+import click
+from estrategias import CruzamentoMediasMoveis
 
 class Backtester:
-    def __init__(self, df, capital_inicial):
-        self.df = df.dropna()
+    def __init__(self, df, capital_inicial, estrategia):
+        self.df_original = df
+        self.df_com_sinais = df
         self.capital_inicial = capital_inicial
         self.capital = capital_inicial
         self.n_acoes = 0
         self.trades = []
         self.posicao = False
+        self.estrategia = estrategia
 
-    def rodar_backtest(self): #itera todos os dias do df checando os sinais
-        print("Iniciando backtest...")
-        for indice, linha in self.df.iterrows():
-            self._checar_sinais(indice, linha)
+    def _rodar_backtest(self):
+        print(f"Iniciando backtest com capital de R$ {self.capital_inicial:.2f}")
+        print(f"Usando a estrategia: {self.estrategia.nome}")
+
+        self.df_com_sinais = self.estrategia.gerar_sinais(self.df_original)
+
+        for indice, dia in self.df_com_sinais.iterrows():
+            if dia['Sinal'].item() == 1 and not self.posicao:
+                self.posicao = True
+                self._executar_compra(indice.date(), dia['Close'].item())
+
+            elif dia['Sinal'].item() == -1 and self.posicao:
+                self.posicao = False
+                self._executar_venda(indice.date(), dia['Close'].item())
+
         print("Backtest finalizado.")
-        print(f"Resultado final: R$ {(self.capital + self.n_acoes * self.df['Close'].iloc[-1].item()):.2f}")
-        
-    def _checar_sinais(self, data, dia_atual): #compara as médias móveis para cada dia e gera um sinal se necessário
-        posicao_atual = self.df.index.get_loc(data)
-        if posicao_atual == 0:
-            return
-        dia_anterior = self.df.iloc[posicao_atual - 1]
-        
-        if dia_atual['SMA_curta'].item() > dia_atual['SMA_longa'].item() and dia_anterior['SMA_curta'].item() <= dia_anterior['SMA_longa'].item() and not self.posicao:
-            preco_compra = dia_atual['Close'].item()
-            self._executar_compra(data.date(), preco_compra)
-            
-        elif dia_atual['SMA_curta'].item() < dia_atual['SMA_longa'].item() and dia_anterior['SMA_curta'].item() >= dia_anterior['SMA_longa'].item() and self.posicao:
-            preco_venda = dia_atual['Close'].item()
-            self._executar_venda(data.date(), preco_venda)
+        print(f"Resultado final: R$ {(self.capital + self.n_acoes * self.df_com_sinais['Close'].iloc[-1].item()):.2f}")
 
-    def _executar_compra(self, data, preco): #executa uma compra
+    def _executar_compra(self, data, preco):
         self.posicao = True
         self.trades.append({'data_compra': data, 'preco_compra': preco})
         self.n_acoes = self.capital // preco
         self.capital -= self.n_acoes * preco
-        
-    def _executar_venda(self, data, preco): #executa uma venda
+
+    def _executar_venda(self, data, preco):
         self.posicao = False
         self.trades.append({'data_venda': data, 'preco_venda': preco})
         self.capital += self.n_acoes * preco
         self.n_acoes = 0
-        
 
-codigo_ativo = input("Insira o código de um ativo (ex: VALE3.SA): ")
-inicio = input("Início do período (ex: 2020-01-01): ")
-fim = input("Final do período (ex: 2023-12-31): ")
+def gerar_grafico_media_movel(ativo):
+    plt.plot(ativo.df_com_sinais['Close'], label="Preco de fechamento")
+    plt.plot(ativo.df_com_sinais['SMA_curta'], label='Media movel curta')
+    plt.plot(ativo.df_com_sinais['SMA_longa'], label='Media movel longa')
 
-dados = yf.download(codigo_ativo, start=inicio, end=fim)
-dados['SMA_curta'] = dados['Close'].rolling(window=21).mean()
-dados['SMA_longa'] = dados['Close'].rolling(window=50).mean()
+    plt.title('Preco de Fechamento vs Media Movel')
+    plt.xlabel('Data')
+    plt.xticks(rotation=45)
+    plt.ylabel('Preco (R$)')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('grafico.png')
 
-ativo_1 = Backtester(dados, 10000)
-ativo_1.rodar_backtest()
-print(f"trades do ativo_1: {ativo_1.trades}")
+@click.command()
+@click.option('--ativo', type=str, required=True, help='Código do ativo. Ex: VALE3.SA')
+@click.option('--inicio', type=str, required=True, help='Data de início no formato AAAA-MM-DD')
+@click.option('--fim', type=str, required=True, help='Data de fim no formato AAAA-MM-DD')
+@click.option('--capital', type=float, default=10000, help='Capital inicial para o backtest.')
+def rodar_aplicacao(ativo, inicio, fim, capital):
+    print("--- Argumentos Recebidos ---")
+    print(f"Ativo: {ativo}")
+    print(f"Data de Inicio: {inicio}")
+    print(f"Data de Fim: {fim}")
+    print(f"Capital Inicial: {capital}")
+    print("Baixando dados do Yahoo Finance...")
+    
+    dados = yf.download(ativo, start=inicio, end=fim, auto_adjust=True)
 
-plt.plot(ativo_1.df['Close'], label=f"Preco de fechamento ({codigo_ativo})")
-plt.plot(ativo_1.df['SMA_curta'], label='Media movel curta')
-plt.plot(ativo_1.df['SMA_longa'], label='Media movel longa')
+    estrat_1 = CruzamentoMediasMoveis(21, 50)
+    ativo_1 = Backtester(dados, capital, estrat_1)
+    ativo_1._rodar_backtest()
+    #gerar_grafico_media_movel(ativo_1)
 
-plt.title('Preco de Fechamento vs Media Movel')
-plt.xlabel('Data')
-plt.xticks(rotation=45)
-plt.ylabel('Preco (R$)')
-plt.legend()
-plt.grid(True)
-plt.savefig('grafico.png')
+if __name__ == '__main__':
+    rodar_aplicacao()
